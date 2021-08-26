@@ -41,7 +41,7 @@ def add_comma_after_closer(line):
     return line + delimiter + comment
 
 
-# This assumes the lua source consists of multiple assignments to a data structure named "data"
+# This assumes the lua source consists of multiple assignments to a data structure named "target"
 # In the resulting python code, all the data assignments are morphed into the declaration of the hash
 # variable passed as "varname"
 def convert(data, target, outvar=None, trim_newlines=False, no_warning=False, numeric_keys=False):
@@ -53,6 +53,8 @@ def convert(data, target, outvar=None, trim_newlines=False, no_warning=False, nu
     no_warning - if True, don't add ValueError warning to pydata
     numeric_keys - if True, don't quote numeric keys in dictionary
     """
+
+    itemize = True
 
     if not outvar:
         outvar = target
@@ -122,7 +124,8 @@ def convert(data, target, outvar=None, trim_newlines=False, no_warning=False, nu
     # "data" is defined as any line containing an = sign
     # and, if there's a brace on the opening line, all lines until a matching closing brace
     # plus the entirety of the line containing the closing brace
-    datalines.append(outvar + " = {")
+    if not itemize:
+        datalines.append(outvar + " = {")
     in_data = False
     depth = 0
     for line in data.splitlines():
@@ -138,7 +141,8 @@ def convert(data, target, outvar=None, trim_newlines=False, no_warning=False, nu
             # This is the end a data set, append a comma
             if depth == 0:
                 in_data = False
-                line = add_comma_after_closer(line)
+                if not itemize:
+                    line = add_comma_after_closer(line)
 
             if depth < 0:
                 raise ValueError("Too many closing brackets", line)
@@ -156,7 +160,10 @@ def convert(data, target, outvar=None, trim_newlines=False, no_warning=False, nu
             res = re.match(pattern, line)
             if not res:
                 continue
-            line = re.sub(pattern, r"\1:", line)
+            if itemize:
+                line = re.sub(pattern, rf"{outvar}[\1] =", line)
+            else:
+                line = re.sub(pattern, r"\1:", line)
 
             depth = line.count("{") + line.count("[") - line.count("}") - line.count("]")
             if depth:  # If there are more opening than closing braces, assume we're in a multi-line assignment
@@ -164,12 +171,18 @@ def convert(data, target, outvar=None, trim_newlines=False, no_warning=False, nu
                 datalines.append(line)
             else:
                 # add a comma to the end of single line assignment items
-                datalines.append(add_comma_after_closer(line))
+                if itemize:
+                    # Replace = target[] with = outvar[]
+                    line = re.sub(fr"=\s*{target}\s*\[\s*", f"= {outvar}[", line)
+                    datalines.append(line)
+                else:
+                    datalines.append(add_comma_after_closer(line))
 
         #  permit empty lines, but ignore everything else
         elif line.strip() == "":
             datalines.append("")
-    datalines.append("}")
+    if not itemize:
+        datalines.append("}")
 
     pydata = "\n".join(datalines)
     # convert lua string escapes to python strings
